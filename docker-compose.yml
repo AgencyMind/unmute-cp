@@ -40,6 +40,7 @@ services:
       - KYUTAI_STT_URL=ws://stt:8080
       - KYUTAI_TTS_URL=ws://tts:8080
       - KYUTAI_LLM_URL=http://llm:8000
+      - KYUTAI_VOICE_CLONING_URL=$KYUTAI_VOICE_CLONING_URL
       - NEWSAPI_API_KEY=$NEWSAPI_API_KEY
     labels:
       - "traefik.enable=true"

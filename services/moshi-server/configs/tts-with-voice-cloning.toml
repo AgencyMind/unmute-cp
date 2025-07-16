@@ -28,5 +28,4 @@ type = "PyPost"
 path = "/api/voice"
 
 [modules.voice_py.py]
-# Use the TTS voice folder for voice cloning
-voice_folder = "hf-snapshot://kyutai/tts-voices/**/*.safetensors"
+mimi_weight = "hf://kyutai/unmute-voice-cloning/e9d43d50_500_mimi_voice.safetensors"

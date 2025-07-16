@@ -235,8 +235,15 @@ async def post_voices(file: UploadFile):
 
     Make sure the maximum file size is configured in uvicorn.
     """
-    name = clone_voice(file.file.read())
-    return {"name": name}
+    try:
+        name = clone_voice(file.file.read())
+        return {"name": name}
+    except Exception as e:
+        logger.error(f"Voice cloning failed: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Voice cloning service not available. Please start the TTS service first. Error: {str(e)}"
+        )
 
 
 @app.get("/v1/voice-donation")
