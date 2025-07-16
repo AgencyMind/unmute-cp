@@ -47,7 +47,8 @@ from unmute.kyutai_constants import (
 )
 from unmute.service_discovery import async_ttl_cached
 from unmute.timer import Stopwatch
-from unmute.tts.voice_cloning import clone_voice
+from unmute.tts.voice_cloning import clone_voice, voice_embeddings_cache
+from unmute.tts.text_to_speech import TextToSpeech, prepare_text_for_tts, TTSClientEosMessage
 from unmute.tts.voice_donation import (
     VoiceDonationSubmission,
     generate_verification,
@@ -276,6 +277,115 @@ async def post_voice_donation(
         raise HTTPException(status_code=400, detail=str(e)) from e
 
     return {}
+
+
+async def generate_speech_with_voice(text: str, voice_name: str) -> bytes:
+    """Generate speech using a cloned voice and return as WAV bytes."""
+    # Prepare text for TTS
+    prepared_text = prepare_text_for_tts(text)
+    
+    # Create TTS instance with the custom voice
+    tts = TextToSpeech(voice=voice_name)
+    
+    # Collect all audio chunks
+    audio_chunks = []
+    
+    try:
+        # Start up TTS connection
+        await tts.start_up()
+        
+        # Send text to TTS
+        await tts.send(prepared_text)
+        await tts.send(TTSClientEosMessage())
+        
+        # Collect audio data
+        async for message in tts:
+            if hasattr(message, 'pcm') and message.pcm:
+                audio_chunks.extend(message.pcm)
+            elif hasattr(message, 'type') and message.type == 'Eos':
+                break
+    finally:
+        # Clean up TTS connection
+        await tts.shutdown()
+    
+    if not audio_chunks:
+        raise ValueError("No audio data generated")
+    
+    # Convert to numpy array and then to WAV bytes
+    audio_array = np.array(audio_chunks, dtype=np.float32)
+    
+    # Convert to 16-bit PCM WAV format
+    audio_int16 = (audio_array * 32767).astype(np.int16)
+    
+    # Create WAV header and data
+    wav_data = create_wav_bytes(audio_int16, SAMPLE_RATE)
+    
+    return wav_data
+
+
+def create_wav_bytes(audio_data: np.ndarray, sample_rate: int) -> bytes:
+    """Create WAV file bytes from audio data."""
+    # WAV file header format
+    num_channels = 1  # Mono
+    bits_per_sample = 16
+    byte_rate = sample_rate * num_channels * bits_per_sample // 8
+    block_align = num_channels * bits_per_sample // 8
+    data_size = len(audio_data) * 2  # 2 bytes per sample
+    file_size = 36 + data_size
+    
+    # Create WAV header
+    header = bytearray()
+    header.extend(b'RIFF')
+    header.extend(file_size.to_bytes(4, 'little'))
+    header.extend(b'WAVE')
+    header.extend(b'fmt ')
+    header.extend((16).to_bytes(4, 'little'))  # Subchunk1Size
+    header.extend((1).to_bytes(2, 'little'))   # AudioFormat (PCM)
+    header.extend(num_channels.to_bytes(2, 'little'))
+    header.extend(sample_rate.to_bytes(4, 'little'))
+    header.extend(byte_rate.to_bytes(4, 'little'))
+    header.extend(block_align.to_bytes(2, 'little'))
+    header.extend(bits_per_sample.to_bytes(2, 'little'))
+    header.extend(b'data')
+    header.extend(data_size.to_bytes(4, 'little'))
+    
+    # Add audio data
+    header.extend(audio_data.tobytes())
+    
+    return bytes(header)
+
+
+class VoiceCloneRequest(BaseModel):
+    voice_name: str
+    text: str
+
+
+@app.post("/v1/voice-clone/generate")
+async def post_voice_clone_generate(request: VoiceCloneRequest):
+    """Generate speech using a cloned voice."""
+    if not request.voice_name:
+        raise HTTPException(status_code=400, detail="voice_name is required")
+    if not request.text:
+        raise HTTPException(status_code=400, detail="text is required")
+    
+    # Check if the voice exists in cache
+    voice_embedding = voice_embeddings_cache.get(request.voice_name)
+    if not voice_embedding:
+        raise HTTPException(status_code=404, detail="Voice not found or expired")
+    
+    try:
+        # Generate speech with the cloned voice
+        audio_data = await generate_speech_with_voice(request.text, request.voice_name)
+        
+        # Return the audio as a WAV file
+        return Response(
+            content=audio_data,
+            media_type="audio/wav",
+            headers={"Content-Disposition": "attachment; filename=cloned_speech.wav"}
+        )
+    except Exception as e:
+        logger.error(f"Error generating speech: {e}")
+        raise HTTPException(status_code=500, detail="Failed to generate speech") from e
 
 
 @app.websocket("/v1/realtime")

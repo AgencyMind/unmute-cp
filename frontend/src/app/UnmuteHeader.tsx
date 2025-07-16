@@ -47,6 +47,14 @@ const UnmuteHeader = () => {
         </Link>
       </div>
       <ShortExplanation />
+      <div className="text-xs text-right">
+        <Link
+          href="/voice-clone"
+          className="underline text-green"
+        >
+          Voice Clone Phreak
+        </Link>
+      </div>
       <Modal
         trigger={
           <span className="flex items-center gap-1 text-lightgray">
